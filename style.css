@@ -368,7 +368,12 @@
   .zoom-detail .player-tick:nth-child(odd) { filter: brightness(0.88); }
   .zoom-detail .player-tick.pin-highlight, .zoom-detail .player-tick:hover { filter: none; }
 
-  .chord { stroke-width: 1.1; transition: opacity 120ms ease; cursor: pointer; }
+  /* Non-scaling so the stroke stays a crisp ~1px line at any zoom level --
+     without this, the stroke grows with the same transform scale() as
+     everything else and, at high zoom, ends up wider than the ribbon fill
+     itself (shrunk deliberately, see shrinkSpan in viz.js), completely
+     swallowing the gaps that shrink is supposed to open up between ribbons. */
+  .chord { stroke-width: 1.1; vector-effect: non-scaling-stroke; transition: opacity 120ms ease; cursor: pointer; }
   .chord-conf:hover { opacity: 1 !important; }
   .chord-school { opacity: 0.9; }
   .chord-school:hover { opacity: 1; }
