@@ -847,6 +847,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           target: { startAngle: targetSeg.startAngle, endAngle: targetSeg.endAngle, radius: geo.chordRadius },
         }))
         .attr("fill", colorOf(conf))
+        .attr("stroke", colorOf(conf))
         .style("opacity", opacityScale(deps.length))
         .on("mousemove", (event) => {
           showTip(`<strong>${label}</strong><br>${deps.length} player${deps.length === 1 ? "" : "s"}<br><em>Click for the full list</em>`, event);
@@ -874,6 +875,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           target: { startAngle: targetSeg.startAngle, endAngle: targetSeg.endAngle, radius: geo.chordRadius },
         }))
         .attr("fill", colorOf(otherConf))
+        .attr("stroke", colorOf(otherConf))
         .style("opacity", opacityScale(deps.length))
         .on("mousemove", (event) => {
           showTip(`<strong>${label}</strong><br>${deps.length} player${deps.length === 1 ? "" : "s"}<br><em>Click for the full list</em>`, event);
@@ -913,6 +915,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
             target: { startAngle: targetSeg.startAngle, endAngle: targetSeg.endAngle, radius: geo.chordRadius },
           }))
           .attr("fill", baseColor)
+          .attr("stroke", baseColor)
           .on("mousemove", (event) => {
             showTip(`<strong>${school} &rarr; ${seg.target}</strong><br>${count} player${count === 1 ? "" : "s"}<br><em>Click for the full list</em>`, event);
           })
@@ -944,6 +947,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
             target: { startAngle: targetSeg.startAngle, endAngle: targetSeg.endAngle, radius: geo.chordRadius },
           }))
           .attr("fill", srcColor)
+          .attr("stroke", srcColor)
           .on("mousemove", (event) => {
             showTip(`<strong>${f.source} &rarr; ${school}</strong><br>${count} player${count === 1 ? "" : "s"}<br><em>Click for the full list</em>`, event);
           })
@@ -975,6 +979,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
         target: { startAngle: targetSeg.startAngle, endAngle: targetSeg.endAngle, radius: geo.chordRadius },
       }))
       .attr("fill", colorOf(prepared.innerByName.get(school).conference))
+      .attr("stroke", colorOf(prepared.innerByName.get(school).conference))
       .style("opacity", 0.9)
       .on("click", (event) => { event.stopPropagation(); togglePlayerPin(school, dep, a0, a1); });
     if (interactive) {
@@ -1033,6 +1038,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           target: { startAngle: targetSeg.startAngle, endAngle: targetSeg.endAngle, radius: geo.chordRadius },
         }))
         .attr("fill", colorOf(conf))
+        .attr("stroke", colorOf(conf))
         .style("opacity", opacityScale(deps.length))
         .on("mousemove", (event) => {
           showTip(`<strong>${label}</strong><br>${deps.length} player${deps.length === 1 ? "" : "s"}<br><em>Click for the full list</em>`, event);
@@ -1517,6 +1523,7 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
           target: { startAngle: targetSpan.startAngle, endAngle: targetSpan.endAngle, radius: geo.chordRadius },
         }))
         .attr("fill", colorOfConf(fillConf, mode))
+        .attr("stroke", colorOfConf(fillConf, mode))
         .style("opacity", layer.opacity);
     } else {
       const srcOff = offsetOf(sourceUniverse), tgtOff = offsetOf(targetUniverse);
@@ -1529,6 +1536,7 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
         .attr("class", "chord chord-cross")
         .attr("d", crossRibbonPath(p1, p2, p3, p4, midX))
         .attr("fill", colorOfConf(fillConf, mode))
+        .attr("stroke", colorOfConf(fillConf, mode))
         .style("opacity", layer.opacity);
     }
     if (opts.extraClass) sel.classed(opts.extraClass, true);
