@@ -380,6 +380,12 @@
   .player-tick.pin-highlight { stroke-width: 1px !important; }
   text.conf-label.pin-highlight { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
 
+  /* A single-player ribbon picked out of a fan-out via the side panel:
+     itself gets a crisp full-strength outline, every sibling ribbon in the
+     same fan-out fades back so the picked one reads clearly against them. */
+  .chord.player-isolated { opacity: 1 !important; stroke: var(--ink-1) !important; stroke-width: 1.8px !important; }
+  .chord.sibling-dimmed { opacity: 0.12 !important; }
+
   .legend {
     display: flex;
     flex-wrap: wrap;
@@ -479,6 +485,9 @@
     font-size: 12.5px;
   }
   .side-panel-row:last-child { border-bottom: none; }
+  .side-panel-row.spr-clickable { cursor: pointer; margin: 0 -14px; padding: 7px 14px; }
+  .side-panel-row.spr-clickable:hover { background: var(--bg-page); }
+  .side-panel-row.spr-clickable.selected { background: var(--hairline); }
   .spr-name { color: var(--ink-1); font-weight: 550; }
   .spr-detail { color: var(--ink-3); font-size: 11.5px; }
   .side-panel-empty { padding: 10px 0; color: var(--ink-3); font-size: 12.5px; }

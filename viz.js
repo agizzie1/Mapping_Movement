@@ -526,20 +526,56 @@ function buildFilterBar(key, allDeps, conferenceOrder) {
 
 // ---- side panel: full player lists for a clicked segment, or a single
 // player's detail, without crowding the diagram itself with a big tooltip.
+// A row may carry an `onClick(selected)` -- used only for rows whose whole
+// origin->destination ribbon is exactly that one player, so "isolating" the
+// row's ribbon is unambiguous. Rows without onClick (multi-player pairs)
+// render as plain, non-interactive text.
 function showSidePanel(title, rows) {
   const panel = document.getElementById("side-panel");
   if (!panel) return;
   document.getElementById("side-panel-title").innerHTML = title;
   document.getElementById("side-panel-count").textContent =
     rows.length ? `${rows.length} player${rows.length === 1 ? "" : "s"}` : "";
-  document.getElementById("side-panel-body").innerHTML = rows.length
-    ? rows.map(r => `<div class="side-panel-row"><span class="spr-name">${r.name}</span><span class="spr-detail">${r.detail}</span></div>`).join("")
+  const body = document.getElementById("side-panel-body");
+  body.innerHTML = rows.length
+    ? rows.map(r => `<div class="side-panel-row${r.onClick ? " spr-clickable" : ""}"><span class="spr-name">${r.name}</span><span class="spr-detail">${r.detail}</span></div>`).join("")
     : `<div class="side-panel-empty">No players</div>`;
   panel.classList.add("open");
+  [...body.children].forEach((el, i) => {
+    const onClick = rows[i] && rows[i].onClick;
+    if (!onClick) return;
+    el.addEventListener("click", () => {
+      const nowSelected = !el.classList.contains("selected");
+      [...body.children].forEach(sib => sib.classList.remove("selected"));
+      if (nowSelected) el.classList.add("selected");
+      onClick(nowSelected);
+    });
+  });
 }
 function hideSidePanel() {
   const panel = document.getElementById("side-panel");
   if (panel) panel.classList.remove("open");
+  clearRibbonIsolation();
+}
+
+// Highlights the single ribbon matching `pairKey` (an origin::destination
+// school pair) and dims every other currently-rendered ribbon so a
+// single-player connection can be picked out of a busy fan-out. Scoped by
+// a shared `data-pair-key` attribute set on every school-pair ribbon path,
+// not by which panel/universe is currently visible -- fine in practice
+// since a school-pair key is specific enough that stale matches in a
+// hidden tab are inert.
+function isolateRibbon(pairKey) {
+  document.querySelectorAll("[data-pair-key]").forEach(el => {
+    const mine = el.getAttribute("data-pair-key") === pairKey;
+    el.classList.toggle("player-isolated", mine);
+    el.classList.toggle("sibling-dimmed", !mine);
+  });
+}
+function clearRibbonIsolation() {
+  document.querySelectorAll(".player-isolated, .sibling-dimmed").forEach(el => {
+    el.classList.remove("player-isolated", "sibling-dimmed");
+  });
 }
 function openPlayerPanel(school, dep) {
   showSidePanel(dep.n, [{ name: `${school} &mdash; ${depStatusHtml(dep)}`, detail: `${dep.d}<br>${playerMetaHtml(dep)}` }]);
@@ -699,8 +735,11 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           setPin({ type: "school", key: d.school });
           pinnedSegKey = segKey;
           openSegmentPanel(() => {
-            const rows = (filtersActive(filters) ? deps.filter(dep => matchesFilters(dep, filters, { conf: d.conference, school: d.school })) : deps)
-              .map(dep => ({ name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}` }));
+            const matched = filtersActive(filters) ? deps.filter(dep => matchesFilters(dep, filters, { conf: d.conference, school: d.school })) : deps;
+            const rows = matched.map(dep => ({
+              name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}`,
+              onClick: matched.length === 1 ? (selected) => (selected ? isolateRibbon(segKey) : clearRibbonIsolation()) : undefined,
+            }));
             showSidePanel(`${d.school} &rarr; ${seg.target}`, rows);
           });
         });
@@ -916,6 +955,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           }))
           .attr("fill", baseColor)
           .attr("stroke", baseColor)
+          .attr("data-pair-key", `${school}::${seg.target}`)
           .on("mousemove", (event) => {
             showTip(`<strong>${school} &rarr; ${seg.target}</strong><br>${count} player${count === 1 ? "" : "s"}<br><em>Click for the full list</em>`, event);
           })
@@ -923,7 +963,12 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           .on("click", (event) => {
             event.stopPropagation();
             openSegmentPanel(() => {
-              const rows = filteredSchoolDeps(school, seg.target).map(dep => ({ name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}` }));
+              const deps = filteredSchoolDeps(school, seg.target);
+              const pairKey = `${school}::${seg.target}`;
+              const rows = deps.map(dep => ({
+                name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}`,
+                onClick: deps.length === 1 ? (selected) => (selected ? isolateRibbon(pairKey) : clearRibbonIsolation()) : undefined,
+              }));
               showSidePanel(`${school} &rarr; ${seg.target}`, rows);
             });
           });
@@ -948,6 +993,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           }))
           .attr("fill", srcColor)
           .attr("stroke", srcColor)
+          .attr("data-pair-key", `${f.source}::${school}`)
           .on("mousemove", (event) => {
             showTip(`<strong>${f.source} &rarr; ${school}</strong><br>${count} player${count === 1 ? "" : "s"}<br><em>Click for the full list</em>`, event);
           })
@@ -955,7 +1001,12 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
           .on("click", (event) => {
             event.stopPropagation();
             openSegmentPanel(() => {
-              const rows = filteredSchoolDeps(f.source, school).map(dep => ({ name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}` }));
+              const deps = filteredSchoolDeps(f.source, school);
+              const pairKey = `${f.source}::${school}`;
+              const rows = deps.map(dep => ({
+                name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}`,
+                onClick: deps.length === 1 ? (selected) => (selected ? isolateRibbon(pairKey) : clearRibbonIsolation()) : undefined,
+              }));
               showSidePanel(`${f.source} &rarr; ${school}`, rows);
             });
           });
@@ -1416,8 +1467,11 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
             setPin({ type: "school", key: d.school });
             pinnedSegKey = segKey;
             openSegmentPanel(() => {
-              const rows = (filtersActive(filters) ? deps.filter(dep => matchesFilters(dep, filters, { conf: d.conference, school: d.school })) : deps)
-                .map(dep => ({ name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}` }));
+              const matched = filtersActive(filters) ? deps.filter(dep => matchesFilters(dep, filters, { conf: d.conference, school: d.school })) : deps;
+              const rows = matched.map(dep => ({
+                name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}`,
+                onClick: matched.length === 1 ? (selected) => (selected ? isolateRibbon(segKey) : clearRibbonIsolation()) : undefined,
+              }));
               showSidePanel(`${d.school} &rarr; ${seg.target}`, rows);
             });
           });
@@ -1540,6 +1594,7 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
         .style("opacity", layer.opacity);
     }
     if (opts.extraClass) sel.classed(opts.extraClass, true);
+    if (opts.pairKey) sel.attr("data-pair-key", opts.pairKey);
     if (opts.onClick) sel.on("click", opts.onClick);
     if (opts.interactive) {
       sel.on("mousemove", (event) => { showTip(tipHtml, event); cancelPlayerHoverClear(); })
@@ -1633,8 +1688,14 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
           seg, targetSeg, d.universe, targetLayout.universe, d.conference,
           `<strong>${school} &rarr; ${seg.target}</strong><br>${count} player${count === 1 ? "" : "s"}<br><em>Click for the full list</em>`,
           {
+            pairKey: `${school}::${seg.target}`,
             onClick: () => openSegmentPanel(() => {
-              const rows = filteredSchoolDeps(school, seg.target).map(dep => ({ name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}` }));
+              const deps = filteredSchoolDeps(school, seg.target);
+              const pairKey = `${school}::${seg.target}`;
+              const rows = deps.map(dep => ({
+                name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}`,
+                onClick: deps.length === 1 ? (selected) => (selected ? isolateRibbon(pairKey) : clearRibbonIsolation()) : undefined,
+              }));
               showSidePanel(`${school} &rarr; ${seg.target}`, rows);
             }),
           });
@@ -1655,8 +1716,14 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
           srcSeg, targetSeg, srcLayout.universe, d.universe, srcLayout.conference,
           `<strong>${f.source} &rarr; ${school}</strong><br>${count} player${count === 1 ? "" : "s"}<br><em>Click for the full list</em>`,
           {
+            pairKey: `${f.source}::${school}`,
             onClick: () => openSegmentPanel(() => {
-              const rows = filteredSchoolDeps(f.source, school).map(dep => ({ name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}` }));
+              const deps = filteredSchoolDeps(f.source, school);
+              const pairKey = `${f.source}::${school}`;
+              const rows = deps.map(dep => ({
+                name: dep.n, detail: `${dep.d}<br>${playerMetaHtml(dep)}`,
+                onClick: deps.length === 1 ? (selected) => (selected ? isolateRibbon(pairKey) : clearRibbonIsolation()) : undefined,
+              }));
               showSidePanel(`${f.source} &rarr; ${school}`, rows);
             }),
           });
