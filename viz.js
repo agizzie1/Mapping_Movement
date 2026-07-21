@@ -1588,6 +1588,18 @@ function colorOfConf(conf, mode) {
   const p = PALETTES[universe];
   return p[mode][p.conferences.indexOf(conf)];
 }
+// Prior-transfer hops carry a "fc" (origin conference) that isn't always
+// resolvable -- a player's very first, pre-transfer school only has a known
+// conference if it happens to appear elsewhere in the sheet (see
+// build_school_conference_map in build_chord_data.py); this falls back to
+// the same neutral "leftover" color used elsewhere for untracked movement
+// rather than mis-coloring via colorOfConf's FBS/FCS guess.
+function colorOfConfOrGrey(conf, mode) {
+  if (conf && (PALETTES.fbs.conferences.includes(conf) || PALETTES.fcs.conferences.includes(conf))) {
+    return colorOfConf(conf, mode);
+  }
+  return "var(--leftover)";
+}
 
 // Ribbon between two DIFFERENT circles (different centers), so d3.ribbon()
 // (which assumes both ends share one center) doesn't apply. Approximates
@@ -1708,6 +1720,15 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
     playerKey,
     getPin: () => pin,
     setPin: (next) => setPin(next),
+    // Only this (combined) view draws the extra transfer-history ribbons --
+    // see the design note on renderPriorHopChords -- so only here does the
+    // "Show prior transfers" toggle do anything beyond expanding the text
+    // list it already controlled.
+    onPriorToggle: (expanded) => { priorTransfersOn = expanded; redrawPin(); },
+    onHopSelect: (num) => {
+      selectedHopNum = num;
+      if (pin && pin.type === "player") renderPriorHopChords(pin.school, pin.dep);
+    },
   });
 
   // See the matching block in renderUniverse.
@@ -1768,6 +1789,11 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
 
   // ---- layers, back to front ----------------------------------------------
   const gPinCrossChords = root.append("g").attr("class", "layer-pin-cross-chords");
+  // Prior-transfer-history ribbons (see renderPriorHopChords below) sit in
+  // their own layer, behind gPinPlayerChords/gPinCrossChords, so the
+  // player's current/most-recent-transfer ribbon always renders on top of
+  // its own prior history where the two visually overlap.
+  const gPinPriorCrossChords = root.append("g").attr("class", "layer-pin-prior-cross-chords");
   const gCrossChords = root.append("g").attr("class", "layer-cross-chords");
   const halves = {};
   for (const universe of ["fbs", "fcs"]) {
@@ -1776,6 +1802,7 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
       wrap,
       gPinConfChords: wrap.append("g").attr("class", "layer-pin-conf-chords"),
       gPinSchoolChords: wrap.append("g").attr("class", "layer-pin-school-chords"),
+      gPinPriorChords: wrap.append("g").attr("class", "layer-pin-prior-chords"),
       gPinPlayerChords: wrap.append("g").attr("class", "layer-pin-player-chords"),
       gConfChords: wrap.append("g").attr("class", "layer-conf-chords"),
       gSchoolChords: wrap.append("g").attr("class", "layer-school-chords"),
@@ -1950,6 +1977,10 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
   // ---- shared chord-drawing helpers (route to the right layer/coord-space) -
   function appendFlowRibbon(layer, sourceSeg, targetSpan, sourceUniverse, targetUniverse, fillConf, tipHtml, opts) {
     opts = opts || {};
+    // Normally a real, always-valid conference name (colorOfConf handles
+    // it); renderPriorHopChords passes opts.fillColor instead when the
+    // color needs a neutral-grey fallback for an unresolvable conference.
+    const color = opts.fillColor || colorOfConf(fillConf, mode);
     const srcSpan = shrinkSpan(sourceSeg.startAngle, sourceSeg.endAngle, geo.chordRadius);
     const tgtSpan = shrinkSpan(targetSpan.startAngle, targetSpan.endAngle, geo.chordRadius);
     let sel;
@@ -1957,8 +1988,8 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
       sel = layer.same.append("path")
         .attr("class", "chord")
         .attr("d", localRibbon({ source: srcSpan, target: tgtSpan }))
-        .attr("fill", colorOfConf(fillConf, mode))
-        .attr("stroke", colorOfConf(fillConf, mode))
+        .attr("fill", color)
+        .attr("stroke", color)
         .style("opacity", layer.opacity);
     } else {
       const srcOff = offsetOf(sourceUniverse), tgtOff = offsetOf(targetUniverse);
@@ -1970,12 +2001,13 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
       sel = layer.cross.append("path")
         .attr("class", "chord chord-cross")
         .attr("d", crossRibbonPath(p1, p2, p3, p4, midX))
-        .attr("fill", colorOfConf(fillConf, mode))
-        .attr("stroke", colorOfConf(fillConf, mode))
+        .attr("fill", color)
+        .attr("stroke", color)
         .style("opacity", layer.opacity);
     }
     if (opts.extraClass) sel.classed(opts.extraClass, true);
     if (opts.pairKey) sel.attr("data-pair-key", opts.pairKey);
+    if (opts.dashArray) sel.style("stroke-dasharray", opts.dashArray);
     if (opts.onClick) sel.on("click", opts.onClick);
     if (opts.interactive) {
       sel.on("mouseenter", (event) => { showTip(tipHtml, event); cancelPlayerHoverClear(); })
@@ -1986,6 +2018,7 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
         .on("mousemove", moveTip)
         .on("mouseleave", hideTip);
     }
+    return sel;
   }
 
   function renderConferenceChords(sameGroups, crossGroup, conf, direction) {
@@ -2132,12 +2165,133 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
       });
   }
 
+  function clearPriorHopChords() {
+    pinPriorSame.fbs.selectAll("*").remove();
+    pinPriorSame.fcs.selectAll("*").remove();
+    gPinPriorCrossChords.selectAll("*").remove();
+  }
+
+  // A small fixed-width tick centered on a school's own inner-ring arc,
+  // used as a prior-transfer hop's endpoint. Unlike the player's CURRENT
+  // departure (which has a real per-player tick angle, a0/a1, because it's
+  // one of THIS season's tracked departures) a prior hop is a historical
+  // event from a past season that isn't itself in `data.flows` at all --
+  // there's no aggregate subdivision to anchor to, so this just marks the
+  // school's location on the ring rather than implying a proportional
+  // share of it.
+  const PRIOR_HOP_HALF_WIDTH = 0.006;
+  function schoolAnchorSpan(school) {
+    const d = prepared.innerByName.get(school);
+    if (!d) return null;
+    const mid = midAngle(d);
+    const half = Math.min((d.endAngle - d.startAngle) / 2, PRIOR_HOP_HALF_WIDTH);
+    return { startAngle: mid - half, endAngle: mid + half, universe: d.universe };
+  }
+
+  // Draws every prior-transfer hop (dep.pt, oldest first) as its own thin
+  // ribbon, numbered to match the corresponding row in the player-search
+  // tip's expandable list (see player-search.js's priorRowsHtml) -- clicking
+  // either one highlights the other via selectedHopNum. Each hop is colored
+  // by the conference the player was leaving FROM in that hop specifically
+  // (build_chord_data.py's "fc"), falling back to a neutral grey when that
+  // conference isn't on record (colorOfConfOrGrey); a hop is skipped
+  // entirely (not even drawn grey) when either school in the pair has no
+  // arc position at all in this combined dataset -- true one-off stops
+  // (international, D2/D3/NAIA) that never otherwise appear in the sheet.
+  // The player's current/most-recent transfer is deliberately NOT included
+  // here -- it already has its own always-on ribbon via
+  // renderPlayerChordInto, which this layer sits behind (see the gPinPrior*
+  // layer comment above).
+  // Midpoint (in whichever group's own local coordinate space the ribbon
+  // itself draws in -- see appendFlowRibbon) for a hop's numbered badge:
+  // the straight-line midpoint between the two endpoints' arc positions,
+  // which sits close enough to the actual ribbon curve to read as "on" it
+  // without needing the ribbon path's exact bezier midpoint.
+  //
+  // A "there and back" pair (a player who transferred A -> B and, later,
+  // B -> A again -- not unusual in this data) produces the exact same
+  // straight-line midpoint for both hops, which would stack both numbered
+  // badges on top of each other. `num` nudges each successive hop's badge
+  // further off that shared midpoint -- toward the circle's own center for
+  // a same-universe ribbon (each hop's badge lands at a different radius,
+  // like concentric rings), or vertically for a cross-universe one (whose
+  // "center" isn't a single point) -- so a repeated pair still gets two
+  // readable, distinguishable positions instead of one illegible stack.
+  function hopLabelPoint(srcSpan, tgtSpan, num) {
+    if (srcSpan.universe === tgtSpan.universe) {
+      const p1 = polar(midAngle(srcSpan), geo.chordRadius, null);
+      const p2 = polar(midAngle(tgtSpan), geo.chordRadius, null);
+      const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2;
+      const pull = 1 - Math.min(0.5, num * 0.09);
+      return { point: [mx * pull, my * pull], group: pinPriorSame[srcSpan.universe] };
+    }
+    const p1 = polar(midAngle(srcSpan), geo.chordRadius, offsetOf(srcSpan.universe));
+    const p2 = polar(midAngle(tgtSpan), geo.chordRadius, offsetOf(tgtSpan.universe));
+    const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2 + (num - 1) * 16;
+    return { point: [mx, my], group: gPinPriorCrossChords };
+  }
+  function renderPriorHopChords(school, dep) {
+    clearPriorHopChords();
+    const pt = dep.pt || [];
+    const mode = currentMode();
+    for (let i = 0; i < pt.length; i++) {
+      const stop = pt[i];
+      const num = i + 1;
+      const srcSpan = schoolAnchorSpan(stop.f);
+      const tgtSpan = schoolAnchorSpan(stop.s);
+      if (!srcSpan || !tgtSpan) continue;
+      const selected = selectedHopNum === num;
+      const color = colorOfConfOrGrey(stop.fc, mode);
+      const yearText = stop.g ? `${stop.g} &middot; ${stop.y || "Unknown"}` : (stop.y || "Unknown");
+      const tipHtml = `<strong>#${num} &mdash; ${dep.n}</strong><br>${stop.f} &rarr; ${stop.s}<br>${yearText}`;
+      const hopClick = (event) => { event.stopPropagation(); selectHopFromRibbon(num); };
+      const sel = appendFlowRibbon(
+        { same: pinPriorSame[srcSpan.universe], cross: gPinPriorCrossChords, opacity: selected ? 0.95 : (selectedHopNum ? 0.25 : 0.6) },
+        srcSpan, tgtSpan, srcSpan.universe, tgtSpan.universe, stop.fc,
+        tipHtml,
+        { extraClass: "chord-prior-hop", interactive: true, fillColor: color, dashArray: "1 3", onClick: hopClick }
+      );
+      sel.classed("chord-prior-hop-selected", selected);
+
+      // Numbered badge, always visible (not just on hover) per the request
+      // that each ribbon carry its own transfer number -- shares the
+      // ribbon's color/click/dim state so the two read as one unit.
+      const { point, group } = hopLabelPoint(srcSpan, tgtSpan, num);
+      const labelG = group.append("g")
+        .attr("class", "hop-label" + (selected ? " hop-label-selected" : ""))
+        .attr("transform", `translate(${point[0]},${point[1]})`)
+        .style("opacity", selected ? 1 : (selectedHopNum ? 0.4 : 0.85))
+        .on("click", hopClick)
+        .on("mouseenter", (event) => showTip(tipHtml, event))
+        .on("mousemove", moveTip)
+        .on("mouseleave", hideTip);
+      labelG.append("circle").attr("r", 9).attr("fill", color);
+      labelG.append("text").text(num);
+    }
+  }
+
+  // Ribbon <-> list-row selection is bidirectional (see the matching note
+  // in player-search.js): a ribbon click updates this view's own
+  // selectedHopNum (to dim/highlight ribbons) and pushes the same number
+  // into playerSearch's selectHop() so the matching row highlights too,
+  // without that call looping back into a fresh onHopSelect callback.
+  function selectHopFromRibbon(num) {
+    selectedHopNum = selectedHopNum === num ? null : num;
+    if (pin && pin.type === "player") renderPriorHopChords(pin.school, pin.dep);
+    playerSearch.selectHop(selectedHopNum);
+  }
+
   // Pinning a player also drives the side panel: pin it and open the panel,
   // or -- if it's already pinned -- unpin and close the panel, so the two
   // stay in lockstep no matter whether the tick or its ribbon was clicked.
   function togglePlayerPin(school, dep, a0, a1) {
     const key = playerKey(school, dep);
     const wasPinned = pin && pin.type === "player" && pin.key === key;
+    // A fresh pin (a different player, or nothing previously pinned) always
+    // starts with prior-transfer ribbons off -- otherwise clicking straight
+    // into a new player's tick could carry over a stale "show prior
+    // transfers" state left on from whichever player was pinned before.
+    if (!wasPinned) { priorTransfersOn = false; selectedHopNum = null; }
     togglePin({ type: "player", key, school, dep, tickStart: a0, tickEnd: a1 });
     lastPanelRefresh = null;
     if (wasPinned) hideSidePanel(); else openPlayerPanel(school, dep);
@@ -2156,6 +2310,15 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
   const pinConfSame = { fbs: halves.fbs.gPinConfChords, fcs: halves.fcs.gPinConfChords };
   const pinSchoolSame = { fbs: halves.fbs.gPinSchoolChords, fcs: halves.fcs.gPinSchoolChords };
   const pinPlayerSame = { fbs: halves.fbs.gPinPlayerChords, fcs: halves.fcs.gPinPlayerChords };
+  const pinPriorSame = { fbs: halves.fbs.gPinPriorChords, fcs: halves.fcs.gPinPriorChords };
+
+  // Multi-hop transfer-history ribbons, toggled by the player-search tip's
+  // "Show prior transfers" button (see its onPriorToggle below) -- only
+  // meaningful in this combined view (both circles' schools have arc
+  // positions here; see the design note on renderPriorHopChords for why a
+  // solo FBS/FCS panel can't show a player's full cross-level history).
+  let priorTransfersOn = false;
+  let selectedHopNum = null; // 1-based; bidirectionally synced with the ps-prior-list row via playerSearch.selectHop
 
   let showAll = false;
   function renderAllConferenceChords() {
@@ -2289,6 +2452,7 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
     pinPlayerSame.fbs.selectAll("*").remove();
     pinPlayerSame.fcs.selectAll("*").remove();
     gPinCrossChords.selectAll("*").remove();
+    clearPriorHopChords();
     root.selectAll(".pin-highlight").classed("pin-highlight", false);
     if (reposition) hidePinTip();
     if (pin) {
@@ -2308,6 +2472,7 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
       } else if (pin.type === "player") {
         renderPlayerChordInto(pinPlayerSame, gPinCrossChords, pin.school, pin.dep, pin.tickStart, pin.tickEnd);
         root.selectAll(`[data-player-key="${cssEscape(pin.key)}"]`).classed("pin-highlight", true);
+        if (priorTransfersOn) renderPriorHopChords(pin.school, pin.dep);
       }
     }
     restoreBaseDim();
