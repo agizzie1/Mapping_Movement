@@ -448,8 +448,17 @@ function depStatusHtml(dep) {
     ? "still in the transfer portal"
     : `transferred to ${dep.t}${dep.tc && dep.tc !== "Unknown" ? " (" + dep.tc + ")" : ""}`;
 }
+// `dep.pt` became a full array of prior-transfer events (see
+// build_chord_data.py's build_prior_transfers) rather than a bare count on
+// 2026-07-20 -- this reads its length wherever a plain number is needed
+// (tooltip text, the "Prior transfers" filter dimension below), so those
+// stay correct instead of stringifying/NaN-ing on the array itself.
+function ptCount(dep) {
+  return Array.isArray(dep.pt) ? dep.pt.length : (dep.pt ?? null);
+}
 function playerMetaHtml(dep) {
-  const pt = dep.pt === null || dep.pt === undefined ? "unknown prior transfers" : `${dep.pt} prior transfer${dep.pt === 1 ? "" : "s"}`;
+  const n = ptCount(dep);
+  const pt = n === null ? "unknown prior transfers" : `${n} prior transfer${n === 1 ? "" : "s"}`;
   return `${dep.pos} &middot; ${dep.gr} &middot; ${pt}`;
 }
 function playerKey(school, dep) { return school + " " + dep.n + " " + dep.d; }
@@ -515,6 +524,10 @@ function matchesFilters(dep, filters, home) {
       if (filters.school.size && !filters.school.has(home.school)) return false;
       continue;
     }
+    if (dim === "pt") {
+      if (filters.pt.size && !filters.pt.has(ptCount(dep))) return false;
+      continue;
+    }
     const set = filters[dim];
     if (set.size && !set.has(dep[dim])) return false;
   }
@@ -571,6 +584,7 @@ function buildFilterBar(key, allDeps, conferenceOrder) {
     container.innerHTML = "";
     const raw = dim === "conf" ? allDeps.map(r => r.conf)
       : dim === "school" ? allDeps.map(r => r.school)
+      : dim === "pt" ? allDeps.map(r => ptCount(r.dep))
       : allDeps.map(r => r.dep[dim]);
     const values = sortFilterValues(dim, new Set(raw), conferenceOrder);
     for (const v of values) {
