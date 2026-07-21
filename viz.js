@@ -29,6 +29,11 @@ const CONF_PAD = 0.028;
 const MIN_PORTAL_WEIGHT = 0.6; // visual floor so 0-entry schools still get a sliver
 const ZOOM_DETAIL_THRESHOLD = 3; // zoom scale (k) past which individual player lines become interactive
 const ZOOM_OUT_FLOOR = 0.4; // how far below 100% the +/- buttons, Ctrl/Cmd+scroll, and pinch can shrink the diagram
+// Half-width (radians) of a prior-transfer hop's fixed tick anchor -- see
+// each render function's own schoolAnchorSpan for why this can't be a
+// proportional flow-subdivision slice like the current-transfer ribbon
+// gets.
+const PRIOR_HOP_HALF_WIDTH = 0.006;
 
 function currentMode() {
   const stamped = document.documentElement.getAttribute("data-theme");
@@ -834,6 +839,14 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
     playerKey,
     getPin: () => pin,
     setPin: (next) => setPin(next),
+    // Prior-transfer hops that stay within THIS panel's own universe still
+    // draw here (see schoolAnchorSpan/renderPriorHopChords) -- only hops
+    // that leave it (the other level, or fully untracked) get skipped.
+    onPriorToggle: (expanded) => { priorTransfersOn = expanded; redrawPin(); },
+    onHopSelect: (num) => {
+      selectedHopNum = num;
+      if (pin && pin.type === "player") renderPriorHopChords(pin.school, pin.dep);
+    },
   });
 
   // Pinned conference stats box -- shares placeTip/pinTipFilterFloor with
@@ -892,6 +905,11 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
   // ---- layers, back to front -------------------------------------------
   const gPinConfChords = root.append("g").attr("class", "layer-pin-conf-chords");
   const gPinSchoolChords = root.append("g").attr("class", "layer-pin-school-chords");
+  // Prior-transfer-history ribbons (see renderPriorHopChords below) sit
+  // behind gPinPlayerChords, so the player's current/most-recent-transfer
+  // ribbon always renders on top of its own prior history where the two
+  // visually overlap.
+  const gPinPriorChords = root.append("g").attr("class", "layer-pin-prior-chords");
   const gPinPlayerChords = root.append("g").attr("class", "layer-pin-player-chords");
   const gConfChords = root.append("g").attr("class", "layer-conf-chords");
   const gSchoolChords = root.append("g").attr("class", "layer-school-chords");
@@ -1284,12 +1302,104 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
     }
   }
 
+  // Same fallback as combined view's colorOfConfOrGrey, scoped to this
+  // panel's own single palette -- a hop's origin conference that isn't in
+  // THIS universe's conference list (the other level, or unknown) falls
+  // back to neutral grey rather than colorOf silently returning undefined
+  // (palette.conferences.indexOf would be -1).
+  function colorOfOrGrey(conf) {
+    return (conf && palette.conferences.includes(conf)) ? colorOf(conf) : "var(--leftover)";
+  }
+
+  // A small fixed-width tick centered on a school's own inner-ring arc --
+  // see the matching function/comment in renderCombined for why a prior
+  // hop can't reuse the current-transfer ribbon's proportional flow-
+  // subdivision anchor. Returns null (skipping that hop's ribbon entirely)
+  // for a school not part of THIS panel's own universe.
+  function schoolAnchorSpan(school) {
+    const d = prepared.innerByName.get(school);
+    if (!d) return null;
+    const mid = midAngle(d);
+    const half = Math.min((d.endAngle - d.startAngle) / 2, PRIOR_HOP_HALF_WIDTH);
+    return { startAngle: mid - half, endAngle: mid + half };
+  }
+
+  // See the matching function in renderCombined for the "there and back"
+  // overlap this `num`-based pull guards against.
+  function hopLabelPoint(srcSpan, tgtSpan, num) {
+    const p1 = polar(midAngle(srcSpan), geo.chordRadius);
+    const p2 = polar(midAngle(tgtSpan), geo.chordRadius);
+    const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2;
+    const pull = 1 - Math.min(0.5, num * 0.09);
+    return [mx * pull, my * pull];
+  }
+
+  function clearPriorHopChords() { gPinPriorChords.selectAll("*").remove(); }
+
+  // See the fuller design note on renderCombined's copy of this function --
+  // same behavior, just against this panel's single circle instead of two.
+  function renderPriorHopChords(school, dep) {
+    clearPriorHopChords();
+    const pt = dep.pt || [];
+    for (let i = 0; i < pt.length; i++) {
+      const stop = pt[i];
+      const num = i + 1;
+      const srcSpan = schoolAnchorSpan(stop.f);
+      const tgtSpan = schoolAnchorSpan(stop.s);
+      if (!srcSpan || !tgtSpan) continue;
+      const selected = selectedHopNum === num;
+      const color = colorOfOrGrey(stop.fc);
+      const yearText = stop.g ? `${stop.g} &middot; ${stop.y || "Unknown"}` : (stop.y || "Unknown");
+      const tipHtml = `<strong>#${num} &mdash; ${dep.n}</strong><br>${stop.f} &rarr; ${stop.s}<br>${yearText}`;
+      const hopClick = (event) => { event.stopPropagation(); selectHopFromRibbon(num); };
+      gPinPriorChords.append("path")
+        .attr("class", "chord chord-prior-hop" + (selected ? " chord-prior-hop-selected" : ""))
+        .attr("d", zoomAwareRibbon({
+          source: { startAngle: srcSpan.startAngle, endAngle: srcSpan.endAngle, radius: geo.chordRadius },
+          target: { startAngle: tgtSpan.startAngle, endAngle: tgtSpan.endAngle, radius: geo.chordRadius },
+        }))
+        .attr("fill", color).attr("stroke", color)
+        .style("opacity", selected ? 0.95 : (selectedHopNum ? 0.25 : 0.6))
+        .style("stroke-dasharray", "1 3")
+        .on("click", hopClick)
+        .on("mouseenter", (event) => showTip(tipHtml, event))
+        .on("mousemove", moveTip)
+        .on("mouseleave", hideTip);
+
+      const [lx, ly] = hopLabelPoint(srcSpan, tgtSpan, num);
+      const labelG = gPinPriorChords.append("g")
+        .attr("class", "hop-label" + (selected ? " hop-label-selected" : ""))
+        .attr("transform", `translate(${lx},${ly})`)
+        .style("opacity", selected ? 1 : (selectedHopNum ? 0.4 : 0.85))
+        .on("click", hopClick)
+        .on("mouseenter", (event) => showTip(tipHtml, event))
+        .on("mousemove", moveTip)
+        .on("mouseleave", hideTip);
+      labelG.append("circle").attr("r", 9).attr("fill", color);
+      labelG.append("text").text(num);
+    }
+  }
+
+  // Ribbon <-> list-row selection is bidirectional (see player-search.js) --
+  // a ribbon click updates this panel's own selectedHopNum (to dim/
+  // highlight ribbons) and pushes the same number into playerSearch's
+  // selectHop() so the matching row highlights too.
+  function selectHopFromRibbon(num) {
+    selectedHopNum = selectedHopNum === num ? null : num;
+    if (pin && pin.type === "player") renderPriorHopChords(pin.school, pin.dep);
+    playerSearch.selectHop(selectedHopNum);
+  }
+
   // Pinning a player also drives the side panel: pin it and open the panel,
   // or -- if it's already pinned -- unpin and close the panel, so the two
   // stay in lockstep no matter whether the tick or its ribbon was clicked.
   function togglePlayerPin(school, dep, a0, a1) {
     const key = playerKey(school, dep);
     const wasPinned = pin && pin.type === "player" && pin.key === key;
+    // A fresh pin (a different player, or nothing previously pinned) always
+    // starts with prior-transfer ribbons off -- see the matching note in
+    // renderCombined's copy of this function.
+    if (!wasPinned) { priorTransfersOn = false; selectedHopNum = null; }
     togglePin({ type: "player", key, school, dep, tickStart: a0, tickEnd: a1 });
     lastPanelRefresh = null;
     if (wasPinned) hideSidePanel(); else openPlayerPanel(school, dep);
@@ -1442,6 +1552,14 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
   // instead of unpinning -- see the inner-seg click handler below.
   let pinnedSegKey = null;
   let direction = getDirection(universeKey);
+  // Multi-hop transfer-history ribbons, toggled by the player-search tip's
+  // "Show prior transfers" button (see its onPriorToggle below). Unlike the
+  // combined view, every hop rendered here is guaranteed same-circle (no
+  // cross/same distinction needed) -- schoolAnchorSpan below simply returns
+  // null, skipping that hop's ribbon, for any stop whose school isn't part
+  // of THIS panel's own universe (the other level, or fully untracked).
+  let priorTransfersOn = false;
+  let selectedHopNum = null; // 1-based; bidirectionally synced with the ps-prior-list row via playerSearch.selectHop
 
   function pinLabel(p) {
     if (p.type === "player") return `${p.dep.n} &mdash; ${p.school} &rarr; ${p.dep.t} (${p.dep.d})`;
@@ -1456,6 +1574,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
     gPinConfChords.selectAll("*").remove();
     gPinSchoolChords.selectAll("*").remove();
     gPinPlayerChords.selectAll("*").remove();
+    clearPriorHopChords();
     root.selectAll(".pin-highlight").classed("pin-highlight", false);
     if (reposition) hidePinTip();
     if (pin) {
@@ -1481,6 +1600,7 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
       } else if (pin.type === "player") {
         renderPlayerChordInto(gPinPlayerChords, pin.school, pin.dep, pin.tickStart, pin.tickEnd);
         root.selectAll(`[data-player-key="${cssEscape(pin.key)}"]`).classed("pin-highlight", true);
+        if (priorTransfersOn) renderPriorHopChords(pin.school, pin.dep);
       }
     }
     restoreBaseDim();
@@ -2179,7 +2299,6 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
   // there's no aggregate subdivision to anchor to, so this just marks the
   // school's location on the ring rather than implying a proportional
   // share of it.
-  const PRIOR_HOP_HALF_WIDTH = 0.006;
   function schoolAnchorSpan(school) {
     const d = prepared.innerByName.get(school);
     if (!d) return null;
