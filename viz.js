@@ -769,15 +769,21 @@ function renderUniverse(svgEl, legendEl, universeKey, label, prepared, geo) {
   // filtered "show all" backdrop -- needs its ribbons rebuilt at the new
   // zoom level so shrinkSpan's width actually updates; these are the same
   // three cases setDirection and the filter onChange handler each refresh.
-  function refreshRibbonsForZoom() {
+  let zoomRefreshQueued = false;
+function refreshRibbonsForZoom() {
+  if (zoomRefreshQueued) return;
+  zoomRefreshQueued = true;
+  requestAnimationFrame(() => {
+    zoomRefreshQueued = false;
     if (hoverActive) {
-      if (hoverActive.type === "school") renderSchoolChords(gSchoolChords, hoverActive.key, direction);
-      else renderConferenceChords(gConfChords, hoverActive.key, direction);
+      if (hoverActive.type === "school") renderSchoolChords(hoverSchoolSame, gCrossChords, hoverActive.key, direction);
+      else renderConferenceChords(hoverSame, gCrossChords, hoverActive.key, direction);
     } else if (shouldAutoShow()) {
       renderAllConferenceChords();
     }
     if (pin) redrawPin();
-  }
+  });
+}
 
   const palette = PALETTES[universeKey];
   const mode = currentMode();
@@ -1893,15 +1899,21 @@ function renderCombined(svgEl, legendEl, prepared, geo) {
     refreshRibbonsForZoom();
   });
   // See the matching function in renderUniverse.
-  function refreshRibbonsForZoom() {
+  let zoomRefreshQueued = false;
+function refreshRibbonsForZoom() {
+  if (zoomRefreshQueued) return;
+  zoomRefreshQueued = true;
+  requestAnimationFrame(() => {
+    zoomRefreshQueued = false;
     if (hoverActive) {
-      if (hoverActive.type === "school") renderSchoolChords(hoverSchoolSame, gCrossChords, hoverActive.key, direction);
-      else renderConferenceChords(hoverSame, gCrossChords, hoverActive.key, direction);
+      if (hoverActive.type === "school") renderSchoolChords(gSchoolChords, hoverActive.key, direction);
+      else renderConferenceChords(gConfChords, hoverActive.key, direction);
     } else if (shouldAutoShow()) {
       renderAllConferenceChords();
     }
     if (pin) redrawPin();
-  }
+  });
+}
 
   const mode = currentMode();
   const offFbs = [-geo.offset, 0], offFcs = [geo.offset, 0];
