@@ -1616,12 +1616,16 @@ function refreshRibbonsForZoom() {
     renderSchoolChords(gSchoolChords, d.school, direction);
     setDim(n => n.school === d.school);
   }
+
   function leaveSchool() {
     hoverActive = null;
-    gSchoolChords.selectAll("*").remove();
+    hoverSchoolSame.fbs.selectAll("*").remove();
+    hoverSchoolSame.fcs.selectAll("*").remove();
+    gCrossChords.selectAll("*").remove();
     restoreBaseDim();
     if (shouldAutoShow()) renderAllConferenceChords();
   }
+
   function enterConference(conf) {
     hoverActive = { type: "conference", key: conf };
     gSchoolChords.selectAll("*").remove();
@@ -2747,8 +2751,10 @@ function refreshRibbonsForZoom() {
     playerHoverTimer = setTimeout(() => {
       hoverPlayerSame.fbs.selectAll("*").remove();
       hoverPlayerSame.fcs.selectAll("*").remove();
+      gCrossChords.selectAll("*").remove();
       restoreBaseDim();
       hideTip();
+      if (shouldAutoShow()) renderAllConferenceChords();
     }, 300);
   }
   function enterPlayerTick(school, dep, a0, a1, event) {
