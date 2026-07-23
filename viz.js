@@ -2766,6 +2766,20 @@ function refreshRibbonsForZoom() {
   function leavePlayerTick() {
     schedulePlayerHoverClear();
   }
+  function clearAllHover() {
+    hoverActive = null;
+    clearTimeout(playerHoverTimer);
+    hoverSame.fbs.selectAll("*").remove();
+    hoverSame.fcs.selectAll("*").remove();
+    hoverSchoolSame.fbs.selectAll("*").remove();
+    hoverSchoolSame.fcs.selectAll("*").remove();
+    hoverPlayerSame.fbs.selectAll("*").remove();
+    hoverPlayerSame.fcs.selectAll("*").remove();
+    gCrossChords.selectAll("*").remove();
+    restoreBaseDim();
+    hideTip();
+    if (shouldAutoShow()) renderAllConferenceChords();
+  }
 
   let pin = null;
   let lastPanelRefresh = null;
@@ -2874,6 +2888,7 @@ function refreshRibbonsForZoom() {
     if (zoomCtl.wasPanned()) return;
     if (event.target === svgEl) { setPin(null); closeSegmentPanel(); }
   });
+  svg.on("mouseleave", clearAllHover);
 
   // ---- legend --------------------------------------------------------------
   const legend = d3.select(legendEl);
